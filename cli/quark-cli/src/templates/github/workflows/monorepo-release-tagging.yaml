@@ -1,0 +1,291 @@
+name: Monorepo Release Tagging
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  create-release-tag:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if release map exists
+        id: check-map
+        run: |
+          if [[ -f "./.release/map.json" ]]; then
+            echo "map-exists=true" >> $GITHUB_OUTPUT
+            echo "Release map found"
+          else
+            echo "map-exists=false" >> $GITHUB_OUTPUT
+            echo "No release map found - skipping tag creation"
+          fi
+
+      - name: Get latest release tag
+        id: get-latest-tag
+        if: steps.check-map.outputs.map-exists == 'true'
+        run: |
+          LATEST_TAG=$(git tag -l "v*" --sort=-version:refname | head -1 2>/dev/null || echo "")
+          if [[ -n "$LATEST_TAG" ]]; then
+            echo "latest-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+            echo "has-previous-tag=true" >> $GITHUB_OUTPUT
+            echo "Latest tag: $LATEST_TAG"
+          else
+            echo "latest-tag=" >> $GITHUB_OUTPUT
+            echo "has-previous-tag=false" >> $GITHUB_OUTPUT
+            echo "No previous release tags found"
+          fi
+
+      - name: Compare with previous release
+        id: compare-releases
+        if: steps.check-map.outputs.map-exists == 'true'
+        env:
+          HAS_PREVIOUS: ${{ steps.get-latest-tag.outputs.has-previous-tag }}
+          LATEST_TAG: ${{ steps.get-latest-tag.outputs.latest-tag }}
+          COMPARE_SCRIPT: |
+            const fs = require('fs');
+            const currentMap = JSON.parse(fs.readFileSync('./.release/map.json', 'utf8'));
+            const previousMap = JSON.parse(fs.readFileSync('/tmp/previous-map.json', 'utf8'));
+
+            function normalizeForCompare(entry) {
+              if (!entry || typeof entry !== 'object') return '';
+              return JSON.stringify({
+                bumpType: entry.bumpType,
+                baseVersion: entry.baseVersion,
+                newVersion: entry.newVersion,
+                changeLog: entry.changeLog || '',
+                frozen: Boolean(entry.frozen),
+                pinnedDependencies: entry.pinnedDependencies && typeof entry.pinnedDependencies === 'object'
+                  ? entry.pinnedDependencies
+                  : {},
+              });
+            }
+
+            const changes = {
+              added: [],
+              updated: [],
+              removed: [],
+              overallBumpType: 'patch',
+            };
+
+            const getHighestBump = (current, newBump) => {
+              if (!newBump || newBump === '') return current;
+              const priority = { patch: 1, minor: 2, major: 3, new: 2 };
+              const a = priority[newBump] || 0;
+              const b = priority[current] || 0;
+              return a > b ? newBump : current;
+            };
+
+            Object.keys(currentMap).forEach((pkg) => {
+              const currentPkg = currentMap[pkg];
+              const bumpType = currentPkg.bumpType || '';
+              const prevPkg = previousMap[pkg];
+              if (!prevPkg) {
+                changes.added.push({
+                  name: pkg,
+                  version: currentPkg.newVersion,
+                  changelog: currentPkg.changeLog,
+                  bumpType: bumpType,
+                });
+                changes.overallBumpType = getHighestBump(changes.overallBumpType, bumpType);
+              } else if (normalizeForCompare(currentPkg) !== normalizeForCompare(prevPkg)) {
+                changes.updated.push({
+                  name: pkg,
+                  oldVersion: prevPkg.newVersion,
+                  newVersion: currentPkg.newVersion,
+                  changelog: currentPkg.changeLog,
+                  bumpType: bumpType,
+                });
+                changes.overallBumpType = getHighestBump(changes.overallBumpType, bumpType);
+              }
+            });
+
+            Object.keys(previousMap).forEach((pkg) => {
+              if (!currentMap[pkg]) {
+                changes.removed.push({
+                  name: pkg,
+                  version: previousMap[pkg].newVersion,
+                });
+              }
+            });
+
+            console.log(JSON.stringify(changes, null, 2));
+        run: |
+          if [[ "$HAS_PREVIOUS" == "true" ]]; then
+            git show "$LATEST_TAG:.release/map.json" > /tmp/previous-map.json 2>/dev/null || echo "{}" > /tmp/previous-map.json
+            printf '%s\n' "$COMPARE_SCRIPT" | node > /tmp/changes.json
+
+            echo "=== Changes detected ==="
+            cat /tmp/changes.json
+
+            CHANGES_JSON=$(cat /tmp/changes.json | jq -c .)
+            echo "changes=$CHANGES_JSON" >> $GITHUB_OUTPUT
+            echo "is-first-release=false" >> $GITHUB_OUTPUT
+          else
+            echo "=== First release detected ==="
+            echo "is-first-release=true" >> $GITHUB_OUTPUT
+            echo "changes={}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if there are any changes
+        id: has-changes
+        if: steps.check-map.outputs.map-exists == 'true' && steps.compare-releases.outputs.is-first-release == 'false'
+        env:
+          CHANGES: ${{ steps.compare-releases.outputs.changes }}
+        run: |
+          COUNT=$(echo "$CHANGES" | jq '[.added, .updated, .removed] | map(length) | add // 0')
+          if [[ "$COUNT" -eq 0 ]]; then
+            echo "No package changes detected. Skipping release."
+            echo "should-release=false" >> $GITHUB_OUTPUT
+          else
+            echo "Detected $COUNT package changes."
+            echo "should-release=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine release version
+        id: determine-version
+        if: steps.check-map.outputs.map-exists == 'true' && (steps.compare-releases.outputs.is-first-release == 'true' || steps.has-changes.outputs.should-release == 'true')
+        env:
+          IS_FIRST_RELEASE: ${{ steps.compare-releases.outputs.is-first-release }}
+          LATEST_TAG: ${{ steps.get-latest-tag.outputs.latest-tag }}
+          CHANGES: ${{ steps.compare-releases.outputs.changes }}
+        run: |
+          if [[ "$IS_FIRST_RELEASE" == "true" ]]; then
+            NEW_VERSION="v1.0.0"
+            BUMP_TYPE="initial"
+            echo "First release version: $NEW_VERSION"
+          else
+            OVERALL_BUMP_TYPE=$(echo "$CHANGES" | jq -r '.overallBumpType // "patch"')
+
+            if [[ "$LATEST_TAG" =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+              CURRENT_MAJOR=${BASH_REMATCH[1]}
+              CURRENT_MINOR=${BASH_REMATCH[2]}
+              CURRENT_PATCH=${BASH_REMATCH[3]}
+            else
+              CURRENT_MAJOR=0
+              CURRENT_MINOR=0
+              CURRENT_PATCH=0
+            fi
+
+            case "$OVERALL_BUMP_TYPE" in
+              "major")
+                NEW_MAJOR=$((CURRENT_MAJOR + 1))
+                NEW_MINOR=0
+                NEW_PATCH=0
+                ;;
+              "minor")
+                NEW_MAJOR=$CURRENT_MAJOR
+                NEW_MINOR=$((CURRENT_MINOR + 1))
+                NEW_PATCH=0
+                ;;
+              *)
+                NEW_MAJOR=$CURRENT_MAJOR
+                NEW_MINOR=$CURRENT_MINOR
+                NEW_PATCH=$((CURRENT_PATCH + 1))
+                OVERALL_BUMP_TYPE="patch"
+                ;;
+            esac
+
+            NEW_VERSION="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+            BUMP_TYPE="$OVERALL_BUMP_TYPE"
+            echo "Version bump: $LATEST_TAG → $NEW_VERSION ($BUMP_TYPE)"
+          fi
+
+          echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "bump-type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+
+      - name: Create release tag
+        if: steps.check-map.outputs.map-exists == 'true' && (steps.compare-releases.outputs.is-first-release == 'true' || steps.has-changes.outputs.should-release == 'true')
+        env:
+          NEW_VERSION: ${{ steps.determine-version.outputs.new-version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          TAG_NAME="$NEW_VERSION"
+
+          echo "=== Creating tag: $TAG_NAME ==="
+          git tag -a "$TAG_NAME" -m "Release $NEW_VERSION"
+          git push origin "$TAG_NAME"
+          echo "Created release tag: $TAG_NAME"
+
+      - name: Create GitHub Release
+        if: steps.check-map.outputs.map-exists == 'true' && (steps.compare-releases.outputs.is-first-release == 'true' || steps.has-changes.outputs.should-release == 'true')
+        uses: actions/github-script@v7
+        env:
+          IS_FIRST_RELEASE: ${{ steps.compare-releases.outputs.is-first-release }}
+          NEW_VERSION: ${{ steps.determine-version.outputs.new-version }}
+          LATEST_TAG_FOR_COMPARE: ${{ steps.get-latest-tag.outputs.latest-tag }}
+          BUMP_TYPE: ${{ steps.determine-version.outputs.bump-type }}
+          CHANGES_JSON: ${{ steps.compare-releases.outputs.changes }}
+        with:
+          script: |
+            const isFirstRelease = process.env.IS_FIRST_RELEASE === 'true';
+            const prNumber = context.payload.pull_request.number;
+            const newVersion = process.env.NEW_VERSION;
+            const tagName = newVersion;
+            const prTitle = context.payload.pull_request.title;
+            const prAuthor = context.payload.pull_request.user.login;
+            const latestTagForCompare = process.env.LATEST_TAG_FOR_COMPARE || '';
+
+            let releaseBody;
+            if (isFirstRelease) {
+              releaseBody =
+                '🚀 **Initial Release**\n\n' +
+                'This is the first release of our monorepo project!\n\n' +
+                '**PR**: #' + prNumber + ' - ' + prTitle + '  \n' +
+                '**Author**: @' + prAuthor + '\n\n' +
+                '> 📋 See the `.release/map.json` file in this release for complete package details.';
+            } else {
+              const changes = JSON.parse(process.env.CHANGES_JSON || '{}');
+              const bumpType = process.env.BUMP_TYPE || 'patch';
+              const added = changes.added || [];
+              const updated = changes.updated || [];
+              const removed = changes.removed || [];
+              const addedCount = added.length;
+              const updatedCount = updated.length;
+              const removedCount = removed.length;
+              const totalChanges = addedCount + updatedCount + removedCount;
+              const formatNames = (list) =>
+                list.map((pkg) => '`' + pkg.name + '`').join(', ') || 'None';
+              releaseBody =
+                '📦 **Release ' + newVersion + '** (' + bumpType + ' bump)\n\n' +
+                '**PR**: #' + prNumber + ' - ' + prTitle + '  \n' +
+                '**Author**: @' + prAuthor + '  \n' +
+                '**Version**: ' + newVersion + '  \n' +
+                '**Changes**: ' + totalChanges + ' packages affected\n\n' +
+                '## 📊 Summary\n' +
+                '- ✨ **' + addedCount + '** new packages: ' + formatNames(added) + '\n' +
+                '- 🔄 **' + updatedCount + '** updated packages: ' + formatNames(updated) + '\n' +
+                '- 🗑️ **' + removedCount + '** removed packages: ' + formatNames(removed) + '\n\n' +
+                '> **' + bumpType.toUpperCase() + ' RELEASE** - Determined by the highest priority change.\n\n' +
+                '## 🔗 Quick Links\n' +
+                '- [Compare Changes](../../compare/' + latestTagForCompare + '...' + tagName + ')\n' +
+                '- [View Source](../../tree/' + tagName + ')';
+            }
+
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName,
+              name: 'Release ' + newVersion,
+              body: releaseBody,
+              draft: false,
+              prerelease: false,
+            });
+
+      - name: No release map found
+        if: steps.check-map.outputs.map-exists == 'false'
+        run: |
+          echo "No .release/map.json file found"
+          echo "This PR doesn't contain package changes that require a release tag."

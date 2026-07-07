@@ -1,0 +1,81 @@
+name: Sync Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'wiki/**'
+
+concurrency:
+  group: wiki-sync-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Publish wiki from wiki/
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -d wiki ] || [ -z "$(ls -A wiki 2>/dev/null)" ]; then
+            echo "No wiki/ directory or it is empty; nothing to publish."
+            exit 0
+          fi
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          WIKI_WORKDIR="wiki-publish"
+          WIKI_REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+
+          rm -rf "${WIKI_WORKDIR}"
+
+          if git clone "${WIKI_REMOTE}" "${WIKI_WORKDIR}" 2>/dev/null; then
+            echo "Cloned existing GitHub Wiki repository."
+          else
+            echo "GitHub Wiki repository not found; initializing a new one."
+            mkdir -p "${WIKI_WORKDIR}"
+            git -C "${WIKI_WORKDIR}" init
+            git -C "${WIKI_WORKDIR}" branch -M master
+            git -C "${WIKI_WORKDIR}" remote add origin "${WIKI_REMOTE}"
+          fi
+
+          rsync -av --delete \
+            --exclude '.git/' \
+            wiki/ "${WIKI_WORKDIR}/"
+
+          cd "${WIKI_WORKDIR}"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Wiki is already up to date with wiki/ on main."
+            exit 0
+          fi
+
+          SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          git commit -m "Sync wiki from main @ ${SHORT_SHA}"
+
+          # GitHub Wiki repos use `master` as the default branch.
+          if git show-ref --verify --quiet refs/remotes/origin/master; then
+            git push origin HEAD:master
+          elif git show-ref --verify --quiet refs/remotes/origin/main; then
+            git push origin HEAD:main
+          else
+            git push -u origin HEAD:master
+          fi
+
+          echo "GitHub Wiki updated from wiki/ at ${SHORT_SHA}."

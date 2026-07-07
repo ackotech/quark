@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm run build:all
+
+      - name: Test quark-security
+        run: pnpm --filter @quark-hq/quark-security run coverage
+
+      - name: Test quark-scripts
+        run: pnpm --filter @quark-hq/quark-scripts run coverage
+
+      - name: Test quark-cli
+        run: pnpm --filter @quark-hq/quark run coverage

@@ -1,0 +1,193 @@
+name: Wiki PR Impact Comment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+jobs:
+  wiki-impact-comment:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Comment on wiki impact
+        uses: actions/github-script@v7
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        with:
+          script: |
+            const { spawnSync } = require('child_process');
+
+            const MARKER = '<!-- quark-wiki-impact -->';
+            const WIKI_PREFIX = 'wiki/';
+
+            /** Code paths that are documented in the wiki (prefix match). */
+            const INDIRECT_IMPACT_RULES = [
+              {
+                prefixes: ['cli/quark-cli/'],
+                pages: ['CLI-Reference', 'Getting-Started', 'Development-Setup', 'Troubleshooting', 'FAQ'],
+              },
+              {
+                prefixes: ['cli/quark-scripts/'],
+                pages: ['CLI-Reference', 'Release-Process', 'Configuration-Reference', 'Architecture-Overview'],
+              },
+              {
+                prefixes: ['cli/quark-security/'],
+                pages: ['Security-Model', 'Architecture-Overview', 'CLI-Reference'],
+              },
+              {
+                prefixes: ['atlas/'],
+                pages: ['Atlas-User-Guide', 'Architecture-Overview', 'Development-Setup'],
+              },
+              {
+                prefixes: ['quark-config.json'],
+                pages: ['Configuration-Reference'],
+              },
+              {
+                prefixes: ['README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'LICENSE', 'NOTICE'],
+                pages: ['Home', 'FAQ', 'Getting-Started'],
+              },
+            ];
+
+            function assertSafeGitRefSegment(name) {
+              if (typeof name !== 'string' || name.length === 0 || name.length > 255) {
+                throw new Error('Invalid base ref');
+              }
+              if (name.includes('..') || name.includes('\0') || name.includes('\n')) {
+                throw new Error('Invalid base ref');
+              }
+              if (!/^[a-zA-Z0-9/._-]+$/.test(name)) {
+                throw new Error('Invalid base ref');
+              }
+              return name;
+            }
+
+            function gitDiffNameOnly(baseRef) {
+              const diff = spawnSync(
+                'git',
+                ['diff', '--name-only', `origin/${baseRef}...HEAD`],
+                { encoding: 'utf8' }
+              );
+              if (diff.error) throw diff.error;
+              if (diff.status !== 0) {
+                throw new Error(diff.stderr || `git diff exited ${diff.status}`);
+              }
+              return (diff.stdout || '')
+                .split('\n')
+                .map((line) => line.trim())
+                .filter(Boolean);
+            }
+
+            function matchesPrefix(file, prefix) {
+              if (prefix.endsWith('/')) {
+                return file.startsWith(prefix);
+              }
+              return file === prefix || file.startsWith(`${prefix}/`);
+            }
+
+            function wikiPageLabel(file) {
+              const name = file.replace(/^wiki\//, '').replace(/\.md$/, '');
+              return name;
+            }
+
+            const baseRef = assertSafeGitRefSegment(process.env.BASE_REF || 'main');
+            let changedFiles = [];
+
+            try {
+              changedFiles = gitDiffNameOnly(baseRef);
+            } catch (error) {
+              core.warning(`Could not diff against origin/${baseRef}: ${error.message}`);
+              return;
+            }
+
+            const wikiChanges = changedFiles.filter((file) => file.startsWith(WIKI_PREFIX));
+            const nonWorkflowChanges = changedFiles.filter(
+              (file) => !file.startsWith('.github/workflows/wiki-')
+            );
+            const hasWikiChanges = wikiChanges.length > 0;
+
+            const suggestedPages = new Set();
+            for (const file of nonWorkflowChanges) {
+              if (file.startsWith(WIKI_PREFIX)) continue;
+              for (const rule of INDIRECT_IMPACT_RULES) {
+                if (rule.prefixes.some((prefix) => matchesPrefix(file, prefix))) {
+                  for (const page of rule.pages) {
+                    suggestedPages.add(page);
+                  }
+                }
+              }
+            }
+
+            const hasIndirectImpact = suggestedPages.size > 0 && !hasWikiChanges;
+
+            if (!hasWikiChanges && !hasIndirectImpact) {
+              core.info('No wiki impact detected; skipping comment.');
+              return;
+            }
+
+            let body = `${MARKER}\n## Wiki impact\n\n`;
+
+            if (hasWikiChanges) {
+              body += 'This PR **updates wiki source files** in `wiki/`:\n\n';
+              for (const file of wikiChanges.sort()) {
+                body += `- \`${file}\` → wiki page **${wikiPageLabel(file)}**\n`;
+              }
+              body += '\n';
+              body += '> On merge to `main`, the [GitHub Wiki](https://github.com/'
+                + `${context.repo.owner}/${context.repo.repo}/wiki) `
+                + 'is updated automatically from `wiki/`.\n\n';
+            }
+
+            if (hasIndirectImpact) {
+              body += 'This PR **may require wiki updates** but no files under `wiki/` were changed.\n\n';
+              body += 'Consider updating these wiki pages before merge:\n\n';
+              for (const page of [...suggestedPages].sort()) {
+                body += `- [${page}](https://github.com/${context.repo.owner}/${context.repo.repo}/wiki/${page})\n`;
+              }
+              body += '\n';
+              body += 'Edit the source in [`wiki/`](../../tree/main/wiki) so the next merge keeps GitHub Wiki in sync.\n\n';
+            }
+
+            if (hasWikiChanges && hasIndirectImpact) {
+              body += '_Both direct wiki edits and other documented areas changed in this PR._\n\n';
+            }
+
+            body += '---\n';
+            body += '_Automated comment from [wiki-pr-comment.yml](../blob/main/.github/workflows/wiki-pr-comment.yml)._';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(
+              (comment) => comment.user?.type === 'Bot' && comment.body?.includes(MARKER)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info('Updated existing wiki impact comment.');
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+            core.info('Created wiki impact comment.');
