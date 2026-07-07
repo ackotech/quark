@@ -487,7 +487,7 @@ describe("NodeReleaseAdapter", () => {
             );
             expect(mockSpawnSyncSafe).toHaveBeenCalledWith(
                 "pnpm",
-                ["publish", "--no-git-check", "--access", "public"],
+                ["publish", "--no-git-checks", "--access", "public"],
                 expect.objectContaining({
                     cwd: "/repo/packages/ui-button",
                 })

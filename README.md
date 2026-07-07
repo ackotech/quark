@@ -3,7 +3,7 @@
 -->
 
 <h1 align="center">
-  <strong>Quark Design System Boilerplate</strong>
+  <strong>Quark — Polyglot Monorepo Framework</strong>
 </h1>
 
 <p align="center">
@@ -28,14 +28,15 @@
 </p>
 
 <p align="center">
-  An open-source monorepo framework for React component libraries
+  CLI tooling, release automation, and dependency visualization for component libraries — extensible across languages and platforms.
 </p>
 
 ---
 
 Quark provides CLI tooling, release automation, and a dependency visualization
-app so teams can scaffold, develop, test, and publish design-system packages
-from a single workspace.
+app so teams can scaffold, develop, test, and publish packages from a single
+workspace. It supports multiple platforms (Node and Maven today) via pluggable
+adapters, making it extensible to any language or build system.
 
 ## Scope
 
