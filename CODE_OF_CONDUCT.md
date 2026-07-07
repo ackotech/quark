@@ -57,8 +57,9 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-**conduct@acko.tech**.
+reported via [GitHub Issues](https://github.com/ackotech/quark/issues) or by
+contacting the maintainers privately through
+[GitHub Discussions](https://github.com/ackotech/quark/discussions).
 
 All complaints will be reviewed and investigated promptly and fairly.
 

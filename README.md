@@ -39,6 +39,44 @@ app so teams can scaffold, develop, test, and publish packages from a single
 workspace. It supports multiple platforms (Node and Maven today) via pluggable
 adapters, making it extensible to any language or build system.
 
+<p align="center">
+  <img src="assets/quark-architecture.svg" alt="Where Quark fits in your monorepo" width="800" />
+</p>
+
+## Why Quark?
+
+Tools like **Nx**, **Turborepo**, and **Lerna** are excellent at what they do —
+task orchestration, caching, and dependency-aware builds. Quark doesn't replace
+them; it uses Nx under the hood and builds on top of it. Quark exists because
+managing a component library at scale surfaces problems that build tools alone
+don't solve:
+
+- **One-command workspace setup** — `quark new` scaffolds a complete monorepo
+  with pnpm workspaces, Nx, Storybook, CI templates, registry config, and
+  environment templates. No boilerplate assembly required.
+
+- **Interactive release with freeze & cascade** — When a major version bump
+  would break downstream packages, Quark lets you choose: cascade the bump to
+  all dependents, freeze them at their current versions, or selectively pick
+  which packages to freeze. The release map (`.release/map.json`) tracks every
+  decision so production publishes are deterministic.
+
+- **Multi-registry publish with safety checks** — Publish to dev and production
+  registries in a single flow. Quark checks whether a version already exists
+  before publishing, restores original `package.json` and `.npmrc` on failure,
+  and validates scoped package names and auth tokens upfront.
+
+- **Polyglot platform adapters** — Node and Maven are supported today via
+  pluggable adapters. Adding a new language means implementing one adapter
+  interface — the release, publish, and graph logic stays the same.
+
+- **Dependency visualization** — Atlas renders your workspace's package graph in
+  the browser, making it easy to understand what depends on what before you cut
+  a release.
+
+In short, Quark is the layer between your build system and your release process
+— the part that turns "we have a monorepo" into "we can ship packages safely."
+
 ## Scope
 
 This repository contains:
