@@ -250,7 +250,7 @@ export class NodeReleaseAdapter extends BaseReleaseAdapter {
             assertSpawnOk(
                 spawnSyncSafe(
                     "pnpm",
-                    ["publish", "--no-git-check", "--access", "public"],
+                    ["publish", "--no-git-checks", "--access", "public"],
                     { cwd: safePackageDir, stdio: "inherit" }
                 ),
                 "pnpm publish"
