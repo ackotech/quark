@@ -1,0 +1,34 @@
+Quark Design System Boilerplate
+Copyright (c) 2026 Acko Technologies
+
+This product includes software developed by third parties. See the license
+terms in each dependency's source or `node_modules/<package>/LICENSE` after
+installing dependencies.
+
+The following direct dependencies are used by packages in this repository:
+
+- @nx/devkit — Apache-2.0
+- antd — MIT
+- chalk — MIT
+- commander — MIT
+- concurrently — MIT
+- dotenv — BSD-2-Clause
+- ejs — Apache-2.0
+- glob — ISC
+- husky — MIT
+- jest — MIT
+- next — MIT
+- nx — MIT
+- prompts — MIT
+- react / react-dom — MIT
+- react-markdown — MIT
+- reactflow — MIT
+- remark-gfm — MIT
+- rimraf — ISC
+- semver — ISC
+- ts-dedent — MIT
+- typescript — Apache-2.0
+
+This list covers primary runtime and tooling dependencies. Transitive
+dependencies are not enumerated here. Run `pnpm licenses list` from the
+repository root for a complete dependency license report.

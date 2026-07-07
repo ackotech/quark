@@ -1,0 +1,28 @@
+{
+  "name": "@quark-hq/atlas",
+  "version": "0.0.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "dev:mock": "ATLAS_TEST_MODE=1 next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "lint:fix": "eslint --fix"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@quark-hq/quark-security": "workspace:*",
+    "@nx/devkit": "22.1.3",
+    "antd": "^6.1.4",
+    "next": "^16.1.1",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
+    "reactflow": "^11.11.4",
+    "remark-gfm": "^4.0.1"
+  }
+}

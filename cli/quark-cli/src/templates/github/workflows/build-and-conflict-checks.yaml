@@ -1,0 +1,184 @@
+name: Build and conflict checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    paths:
+      - ".release/map.json"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  find-affected:
+    runs-on: ubuntu-latest
+    outputs:
+      affected-packages: ${{ steps.check-changes.outputs.map_changed == 'true' && steps.run-script.outputs.affected || steps.set-no-changes.outputs.affected }}
+      affected-list: ${{ steps.check-changes.outputs.map_changed == 'true' && steps.run-script.outputs.affected-list || steps.set-no-changes.outputs.affected-list }}
+      all-affected-packages: ${{ steps.check-changes.outputs.map_changed == 'true' && steps.find-dependents.outputs.all-affected || steps.set-no-changes.outputs.all-affected }}
+      all-affected-list: ${{ steps.check-changes.outputs.map_changed == 'true' && steps.find-dependents.outputs.all-affected-list || steps.set-no-changes.outputs.all-affected-list }}
+
+    steps:
+      - name: Checkout repo with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Check for map.json changes
+        id: check-changes
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          else
+            BASE_BRANCH="main"
+          fi
+          git fetch origin $BASE_BRANCH
+          changed_files=$(git diff --name-only origin/$BASE_BRANCH...HEAD)
+          if echo "$changed_files" | grep -q "^\.release/map\.json$"; then
+            echo "map_changed=true" >> $GITHUB_OUTPUT
+            git show origin/$BASE_BRANCH:.release/map.json > /tmp/base_map.json 2>/dev/null || echo "{}" > /tmp/base_map.json
+            [ -f .release/map.json ] && cp .release/map.json /tmp/current_map.json || echo "{}" > /tmp/current_map.json
+          else
+            echo "map_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Compare package changes
+        if: steps.check-changes.outputs.map_changed == 'true'
+        uses: actions/github-script@v7
+        id: run-script
+        with:
+          script: |
+            const fs = require('fs');
+            const baseMap = JSON.parse(fs.readFileSync('/tmp/base_map.json', 'utf8'));
+            const currentMap = JSON.parse(fs.readFileSync('/tmp/current_map.json', 'utf8'));
+            
+            function normalizeForCompare(entry) {
+              if (!entry || typeof entry !== 'object') return '';
+              return JSON.stringify({
+                bumpType: entry.bumpType,
+                baseVersion: entry.baseVersion,
+                newVersion: entry.newVersion,
+                changeLog: entry.changeLog || '',
+                frozen: Boolean(entry.frozen),
+                pinnedDependencies: entry.pinnedDependencies && typeof entry.pinnedDependencies === 'object'
+                  ? entry.pinnedDependencies
+                  : {},
+              });
+            }
+            
+            function isPackageAffected(baseEntry, currEntry) {
+              if (!baseEntry) return true;
+              return normalizeForCompare(baseEntry) !== normalizeForCompare(currEntry);
+            }
+            
+            const affected = [];
+            for (const [key, currEntry] of Object.entries(currentMap)) {
+              const baseEntry = baseMap[key];
+              if (isPackageAffected(baseEntry, currEntry)) {
+                affected.push(key);
+              }
+            }
+            core.setOutput('affected', JSON.stringify(affected));
+            core.setOutput('affected-list', affected.join(','));
+            core.exportVariable('AFFECTED_PACKAGES', affected.join(','));
+
+      - name: Find all affected packages including dependents
+        if: steps.check-changes.outputs.map_changed == 'true'
+        id: find-dependents
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const path = require('path');
+            const os = require('os');
+            
+            const directlyAffected = "${{ steps.run-script.outputs.affected-list }}";
+            const modifiedPackages = directlyAffected.split(',').map(p => p.trim()).filter(Boolean);
+            if (!modifiedPackages.length) {
+              core.setOutput('all-affected', '[]');
+              core.setOutput('all-affected-list', '');
+              return;
+            }
+            
+            const tempFile = path.join(os.tmpdir(), 'nx-graph-' + process.pid + '-' + Date.now() + '.json');
+            execSync('npx nx graph --file=' + tempFile, { stdio: 'inherit' });
+            const graph = JSON.parse(fs.readFileSync(tempFile, 'utf-8'));
+            fs.unlinkSync(tempFile);
+            
+            const nodes = (graph.graph && graph.graph.nodes) || graph.nodes || {};
+            const dependencies = (graph.graph && graph.graph.dependencies) || graph.dependencies || {};
+            const reverseDepMap = {};
+            Object.keys(nodes).forEach(pkg => { reverseDepMap[pkg] = []; });
+            Object.entries(dependencies).forEach(([source, deps]) => {
+              deps.forEach(({ target }) => {
+                reverseDepMap[target].push(source);
+              });
+            });
+            
+            const affected = new Set();
+            function dfs(pkg) {
+              if (!affected.has(pkg)) {
+                affected.add(pkg);
+                reverseDepMap[pkg].forEach(dfs);
+              }
+            }
+            modifiedPackages.forEach(dfs);
+            
+            const allAffected = Array.from(affected).sort();
+            core.setOutput('all-affected', JSON.stringify(allAffected));
+            core.setOutput('all-affected-list', allAffected.join(','));
+            core.exportVariable('ALL_AFFECTED_PACKAGES', allAffected.join(','));
+
+      - name: Set no changes output
+        id: set-no-changes
+        if: steps.check-changes.outputs.map_changed != 'true'
+        run: |
+          echo 'affected=[]' >> $GITHUB_OUTPUT
+          echo 'affected-list=' >> $GITHUB_OUTPUT
+          echo 'all-affected=[]' >> $GITHUB_OUTPUT
+          echo 'all-affected-list=' >> $GITHUB_OUTPUT
+          echo 'AFFECTED_PACKAGES=' >> $GITHUB_ENV
+          echo 'ALL_AFFECTED_PACKAGES=' >> $GITHUB_ENV
+
+      - name: Build affected packages
+        if: steps.check-changes.outputs.map_changed == 'true'
+        run: |
+          set -e
+          PACKAGES="${{ steps.find-dependents.outputs.all-affected-list }}"
+          if [ -n "$PACKAGES" ]; then
+            echo "Building affected packages: $PACKAGES"
+            npx nx run-many -t build --projects=$PACKAGES
+          else
+            echo "No packages to build"
+          fi
+
+      - name: Display summary
+        if: steps.check-changes.outputs.map_changed == 'true'
+        run: |
+          echo "=== AFFECTED PACKAGES SUMMARY ==="
+          echo "Directly affected: ${{ steps.run-script.outputs.affected-list }}"
+          echo "All affected: ${{ steps.find-dependents.outputs.all-affected-list }}"
+          D="${{ steps.run-script.outputs.affected-list }}"
+          T="${{ steps.find-dependents.outputs.all-affected-list }}"
+          echo "Direct count: $( [ -z "$D" ] && echo 0 || echo "$D" | tr ',' '\n' | grep -cve '^$' )"
+          echo "Total count: $( [ -z "$T" ] && echo 0 || echo "$T" | tr ',' '\n' | grep -cve '^$' )"

@@ -1,0 +1,9 @@
+{
+  "release": {
+    "excludePackages": [
+    ],
+    "autoCommit": false,
+    "masterBranch": "main",
+    "freeze": false
+  }
+}

@@ -1,0 +1,39 @@
+name: PR Branch Validation
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+
+jobs:
+  check-if-updated:
+    name: Ensure PR branch includes all commits from quark-main
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.base_ref == 'quark-main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch latest quark-main
+        run: |
+          git fetch origin quark-main
+
+      - name: Confirm PR branch includes all commits from quark-main
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          echo "Checking if \"$HEAD_REF\" includes all commits from quark-main"
+          missing_commits=$(git rev-list --count HEAD..origin/quark-main)
+          if [ "$missing_commits" -gt 0 ]; then
+            echo "❌ Your branch is missing $missing_commits commits from quark-main."
+            echo "Please rebase or merge quark-main into your branch."
+            echo ""
+            echo "Missing commits:"
+            git log --oneline HEAD..origin/quark-main
+            exit 1
+          else
+            echo "✅ Your branch includes all commits from quark-main."
+          fi

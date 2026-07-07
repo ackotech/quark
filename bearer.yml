@@ -1,0 +1,7 @@
+# Bearer runs from the repo root. `spawn.ts` is a small, reviewed wrapper around
+# `child_process.spawnSync` (shell disabled + argv validation). SAST flags dynamic
+# spawn sinks without proving sanitizers; excluding this file avoids fingerprint-based
+# ignores while keeping all other rules on the rest of the codebase.
+scan:
+  skip-path:
+    - "**/cli/quark-security/src/spawn.ts"
