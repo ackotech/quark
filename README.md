@@ -7,6 +7,7 @@
 </h1>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/status-beta-orange.svg" alt="Beta" />
   <a href="https://github.com/ackotech/quark/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" />
   </a>
