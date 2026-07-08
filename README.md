@@ -148,6 +148,12 @@ Build packages first with `pnpm run build:all` if Storybook depends on built art
 npm install -g @quark-hq/quark
 ```
 
+Or run it without installing:
+
+```bash
+npx @quark-hq/quark new my-project
+```
+
 ### Create a new workspace
 
 ```bash
@@ -200,6 +206,9 @@ Remove links with `quark remove my-component` or `quark remove --all`.
 4. Commit the generated release map and push. GitHub Actions templates included
    in scaffolded projects handle tagging and registry publish.
 
+For this repository's own release process (tagging, GitHub Releases, and
+registry publish), see [RELEASING.md](RELEASING.md).
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and pull request
 guidelines.
 
@@ -242,12 +251,13 @@ Registry URLs and auth tokens are read from `.env` at publish time.
 | `@quark-hq/quark` CLI (`new`, `create`, Yalc commands) | Active development |
 | `@quark-hq/quark-scripts` release and publish flows | Active development |
 | `@quark-hq/atlas` | Active development |
-| Published npm packages | Best-effort; pin to released versions in production |
+| Published npm packages | Best-effort; pin to [released versions](https://github.com/ackotech/quark/releases) in production |
 | Community support | GitHub Issues on a best-effort basis — no SLA |
 
 This project is maintained by [Acko Technologies](https://github.com/ackotech).
-Breaking changes may occur before a stable 1.0 release. Check release notes and
-tags before upgrading in production monorepos.
+Breaking changes may occur before a stable 1.0 release. Check the
+[changelog](CHANGELOG.md) and [GitHub Releases](https://github.com/ackotech/quark/releases)
+before upgrading in production monorepos.
 
 ## Security
 
@@ -276,6 +286,8 @@ will always be given. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 | Resource | Link |
 | -------- | ---- |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) |
+| Release Process | [RELEASING.md](RELEASING.md) |
 | Contributing Guide | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Security Policy | [SECURITY.md](SECURITY.md) |
 | Code of Conduct | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) |
