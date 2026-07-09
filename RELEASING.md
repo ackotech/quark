@@ -4,6 +4,13 @@ This document describes how to cut a release of this repository. Quark ships
 its own release tooling (`@quark-hq/quark-scripts`), and that tooling is the
 canonical path — do not hand-edit versions or publish packages ad hoc.
 
+> **Current status:** this flow has not yet been exercised end-to-end in this
+> repository — there are no git tags and no `.release/map.json` yet, and the
+> versions published to npm so far (`@quark-hq/quark` 0.0.1–0.0.3,
+> `@quark-hq/quark-scripts` 0.0.1, `@quark-hq/quark-security` 0.0.1) were
+> published manually. The first release that follows this document establishes
+> the tag and release-map baseline that `prod-publish` diffs against.
+
 ## Overview
 
 A release has four stages:
@@ -18,23 +25,40 @@ Repository tags follow the `@quark-hq/quark` CLI version: `v<version>`
 (e.g. `v0.0.3`). Individual workspace packages are versioned independently;
 the release map records each package's version at the release point.
 
+## How to invoke quark-scripts in this repository
+
+> **Note:** the root `package.json` scripts `release` and `publish:dev` are
+> scaffold-template artifacts and do **not** currently work in this repository:
+> `@quark-hq/quark-scripts` is not a root dependency (so the `quark-scripts`
+> bin is never linked at the root), and `publish:dev` invokes a subcommand
+> named `publish:dev` when the real command is `publish-dev`. They do work in
+> scaffolded consumer projects, where `@quark-hq/quark-scripts` is installed
+> as a dependency (apart from the `publish:dev` name mismatch).
+
+In this repository, build the workspace and invoke the built CLI directly:
+
+```bash
+pnpm install
+pnpm run build:all
+node cli/quark-scripts/dist/index.js --help
+```
+
+All commands below use this form. Alternatively,
+`pnpm dlx @quark-hq/quark-scripts <command>` runs the published version of the
+tooling, which may lag behind the repository.
+
 ## Prerequisites
 
 - You are on `main` (see `release.masterBranch` in `quark-config.json`) with a
   clean working tree and the latest commits pulled.
 - Registry credentials are configured in `.env` (see keys in
   `cli/quark-cli/src/init/constants.ts`). Never commit these.
-- Dependencies installed and packages built:
-
-  ```bash
-  pnpm install
-  pnpm run build:all
-  ```
+- Dependencies installed and packages built (see above).
 
 ## 1. Run the release
 
 ```bash
-pnpm run release        # runs: quark-scripts release
+node cli/quark-scripts/dist/index.js release
 ```
 
 This walks the changed packages interactively:
@@ -43,7 +67,7 @@ This walks the changed packages interactively:
 - On a **major** bump, asks whether to cascade the bump to dependent packages,
   freeze them at their current versions, or selectively freeze. Frozen
   packages are recorded with `frozen: true` and skipped by `prod-publish`
-  until released with `quark-scripts unfreeze <package-name>`.
+  until released with the `unfreeze <package-name>` command.
 - Writes every decision to `.release/map.json` — this file is the source of
   truth that makes production publishes deterministic.
 
@@ -71,8 +95,9 @@ git tag v<version>
 git push origin v<version>
 ```
 
-`prod-publish` resolves tags sorted by creation date, so the tag must exist
-before publishing.
+`prod-publish` resolves tags sorted by creation date and exits with
+`No git tags found.` if none exist — the tag must be created before
+publishing.
 
 ## 3. Create the GitHub Release
 
@@ -87,7 +112,7 @@ Prefer pasting the changelog section for this version into the notes
 ## 4. Publish to the registry
 
 ```bash
-npx quark-scripts prod-publish            # or: --tag v<version> to target a specific tag
+node cli/quark-scripts/dist/index.js prod-publish            # or: --tag v<version>
 ```
 
 `prod-publish`:
@@ -103,7 +128,7 @@ npx quark-scripts prod-publish            # or: --tag v<version> to target a spe
 ### Alpha builds (optional, any time)
 
 ```bash
-npx quark-scripts publish-dev             # publishes an alpha version to the dev registry
+node cli/quark-scripts/dist/index.js publish-dev             # alpha version to the dev registry
 ```
 
 ## Configuration

@@ -194,8 +194,12 @@ Remove links with `quark remove my-component` or `quark remove --all`.
 2. Publish alpha builds for testing:
 
    ```bash
-   pnpm run publish:dev
+   pnpm exec quark-scripts publish-dev
    ```
+
+   (The scaffolded `pnpm run publish:dev` script currently invokes a misnamed
+   subcommand — `publish:dev` instead of `publish-dev` — so call the CLI
+   directly until that is fixed.)
 
 3. Create a production release on `main`:
 
